@@ -19,3 +19,7 @@ cargo build --release
 cargo run --release -- --clk-freq <clock frequency in Hz> <trace file>
 ```
 
+## Examples
+
+Check out [counter example](examples/counter.md) for an explanation of how to interpret the output.
+

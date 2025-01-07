@@ -31,20 +31,16 @@ fn val_at(
 
 fn calc_stats(sig: &wellen::Signal, name: String, time_end: wellen::Time) -> Vec<SignalStats> {
     let n = sig.time_indices().len();
-    if n == 0 || !name.contains("root.dram_ctrl.") {
+    if n == 0 {
         return vec![];
     }
 
     let (mut prev_val, mut prev_ts) = val_at(sig.get_first_time_idx().unwrap(), sig);
     let bit_len = prev_val.bits().unwrap();
     let mut ss = Vec::<SignalStats>::with_capacity(bit_len as usize);
-    let name_tcl = name
-        .clone()
-        .replace("root.dram_ctrl.", "")
-        .replace(".", "/");
     for i in 0..bit_len {
         ss.push(SignalStats {
-            name: name_tcl.clone()
+            name: name.clone()
                 + (if bit_len > 1 {
                     format!("[{}]", i)
                 } else {
