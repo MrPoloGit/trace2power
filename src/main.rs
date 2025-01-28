@@ -7,7 +7,10 @@ use clap::Parser;
 use wellen::{self, GetItem, Var, simple::Waveform, Hierarchy, ScopeRef, SignalRef};
 
 pub mod stats;
+pub mod netlist;
 mod exporters;
+
+use netlist::Netlist;
 
 
 #[derive(Parser)]
@@ -18,7 +21,13 @@ struct Cli {
     #[arg(long, default_value = "tcl")]
     output_format: String,
     #[arg(long, short)]
-    scope: Option<String>
+    limit_scope: Option<String>,
+    #[arg(long)]
+    netlist: Option<String>,
+    #[arg(long)]
+    top: Option<String>,
+    #[arg(long)]
+    top_scope: Option<String>,
 }
 
 const LOAD_OPTS: wellen::LoadOptions = wellen::LoadOptions {
@@ -68,7 +77,10 @@ struct Context {
     all_names: Vec<String>,
     lookup_point: LookupPoint,
     output_fmt: OutputFormat,
-    scope_prefix_length: usize
+    scope_prefix_length: usize,
+    netlist: Option<Netlist>,
+    top: String,
+    top_scope: Option<ScopeRef>
 }
 
 impl Context {
@@ -79,12 +91,13 @@ impl Context {
             wellen::simple::read_with_options(args.input_file.to_str().unwrap(), &LOAD_OPTS)
                 .unwrap();
 
-        let lookup_point = match &args.scope {
+        let lookup_point = match &args.limit_scope {
             None => LookupPoint::Top,
             Some(scope_str) => LookupPoint::Scope(
                 get_scope(wave.hierarchy(), scope_str).expect("Requested scope not found")
             ),
         };
+
 
         if let (LookupPoint::Scope(_), OutputFormat::Saif) = (&lookup_point, &output_fmt) {
             panic!("Scoped lookup for SAIF is WIP");
@@ -116,6 +129,12 @@ impl Context {
 
         let clk_period = 1.0_f64 / args.clk_freq;
 
+        let top_scope = args.top_scope.as_ref()
+            .map(|path| path.split('.').collect::<Vec<_>>())
+            .map(|scope| wave.hierarchy().lookup_scope(&scope)
+                .unwrap_or_else(|| panic!("Couldn't find top scope `{}`", scope.join(".")))
+            );
+
         Self {
             wave,
             clk_period,
@@ -124,6 +143,14 @@ impl Context {
             lookup_point,
             output_fmt,
             scope_prefix_length: lookup_scope_name_prefix.len(),
+            netlist: args.netlist.as_ref().map(|path| {
+                let f = std::fs::File::open(path).expect("Couldn't open the netlist file");
+                let reader = std::io::BufReader::new(f);
+                serde_json::from_reader::<_, Netlist>(reader)
+                    .expect("Couldn't parse the netlist file")
+            }),
+            top: args.top.clone().unwrap_or_else(String::new),
+            top_scope,
         }
     }
 }
