@@ -18,30 +18,41 @@ enum ModuleRef<'n> {
     BlackBox,
 }
 
+/// Holds context required by TraceVisitorAgent when to traverse the hierarchy
 struct TraceVisitCtx<'b, 'w, 'n, W> where W: std::io::Write {
+    // TODO: out should not be required for traversal
     out: &'b mut W,
     waveform: &'w Waveform,
     netlist_root: Vec<String>,
     top_module: String,
     netlist: Option<&'n Netlist>,
     netlist_prefix: Vec<String>,
-    blackboxes_only: bool
+    blackboxes_only: bool,
+    remove_virtual_pins: bool,
 }
 
+/// Traverses a hierarchy of scopes and variables loaded from a trace. For a given scope nets are
+/// visited first, then scopes
 trait TraceVisitorAgent<'w, W> where W: Write {
     type Error;
+    /// Called upon entering a new scope
     fn enter_scope(&mut self, ctx: &mut TraceVisitCtx<W>, scope: &'w Scope)
         -> Result<(), Self::Error>;
+    /// Called upon leaving a scope
     fn exit_scope(&mut self, _ctx: &mut TraceVisitCtx<W>, _scope: &'w Scope)
         -> Result<(), Self::Error>
     {
         Ok(())
     }
+    /// Called once all scopes in the current scope have been visited
     fn end_scopes(&mut self, _ctx: &mut TraceVisitCtx<W>) -> Result<(), Self::Error> { Ok(()) }
+    /// Called upon entering a new net
     fn enter_net(&mut self, ctx: &mut TraceVisitCtx<W>, var_ref: VarRef) -> Result<(), Self::Error>;
+    /// Called once all nets in the current scope have been visited
     fn end_nets(&mut self, _ctx: &mut TraceVisitCtx<W>) -> Result<(), Self::Error> { Ok(()) }
 }
 
+/// Implements common functionalities for `TraceVisitorAgent`s
 trait TraceVisit<'b, 'w, 'n, W> where W: Write {
     type Error;
     fn visit_scope<'p> (
@@ -51,10 +62,16 @@ trait TraceVisit<'b, 'w, 'n, W> where W: Write {
         parent_module: ModuleRef<'p>
     ) -> Result<(), Self::Error> where 'n: 'p;
 
-    fn visit_netlist(&mut self, lookup_point: LookupPoint, ctx: &mut TraceVisitCtx<'b, 'w, 'n, W>)
+    /// Visint a hierarchy starting from `lookup_point`
+    fn visit_hierarchy(&mut self, lookup_point: LookupPoint, ctx: &mut TraceVisitCtx<'b, 'w, 'n, W>)
         -> Result<(), Self::Error>;
 }
 
+/// Retrieve a module reference for `scope` given its parent module reference.
+/// If no netlist is present, this will always be `ModuleRef::OutsideNetlist`
+/// Note, this function require `ctx.netlist_prefix` to point to current scope.
+/// This function will not fail when referencing scope paths which don't lie under the netlist,
+/// even if they are not present in hierarchy.
 fn get_child_module_reference<'p, 'b, 'w, 'n, W>(
     ctx: &TraceVisitCtx<'b, 'w, 'n, W>,
     scope: &'w Scope,
@@ -101,12 +118,13 @@ where
     {
         self.enter_scope(ctx, scope)?;
 
-        let name = scope.name(ctx.waveform.hierarchy());
+        let hier = ctx.waveform.hierarchy();
+
+        let name = scope.name(hier);
 
         if let ModuleRef::OutsideNetlist = parent_module {
             ctx.netlist_prefix.push(name.to_string());
         }
-
         let module = get_child_module_reference(ctx, scope, parent_module);
 
         let export_nets = match (ctx.blackboxes_only, module) {
@@ -115,14 +133,22 @@ where
             _ => false
         };
         if export_nets {
-            for var_ref in scope.vars(ctx.waveform.hierarchy()) {
+            for var_ref in scope.vars(hier) {
+                if let ModuleRef::BlackBox = module {
+                    if ctx.remove_virtual_pins {
+                        let var = hier.get(var_ref);
+                        if let "VGND" | "VNB" | "VPB" | "VPWR" = var.name(hier) {
+                            continue;
+                        }
+                    }
+                }
                 self.enter_net(ctx, var_ref)?;
             }
         }
         self.end_nets(ctx)?;
         if let ModuleRef::BlackBox = module { /* Do not descend blackboxes */ } else {
-            for scope_ref in scope.scopes(ctx.waveform.hierarchy()) {
-                let scope = ctx.waveform.hierarchy().get(scope_ref);
+            for scope_ref in scope.scopes(hier) {
+                let scope = hier.get(scope_ref);
                 self.visit_scope(ctx, scope, module)?;
             }
         }
@@ -131,7 +157,7 @@ where
         self.exit_scope(ctx, scope)
     }
 
-    fn visit_netlist(&mut self, lookup_point: LookupPoint, ctx: &mut TraceVisitCtx<'b, 'w, 'n, W>)
+    fn visit_hierarchy(&mut self, lookup_point: LookupPoint, ctx: &mut TraceVisitCtx<'b, 'w, 'n, W>)
         -> Result<(), Self::Error>
     {
         match lookup_point {
@@ -140,7 +166,8 @@ where
                 self.visit_scope(ctx, scope, ModuleRef::OutsideNetlist)?;
             },
             LookupPoint::Scope(scope_ref) => {
-                // TODO: Make this humane
+                // Set up module_ref and ctx.netlist_prefix
+                // TODO: Simplify this logic 
 
                 let hier = ctx.waveform.hierarchy();
                 let scope = hier.get(scope_ref);
@@ -166,6 +193,7 @@ where
                         }
                     }
                 }
+
                 self.visit_scope(ctx, scope, module_ref)?;
             }
         }

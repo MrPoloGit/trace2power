@@ -1,6 +1,8 @@
 // Copyright (c) 2024-2025 Antmicro <www.antmicro.com>
 // SPDX-License-Identifier: Apache-2.0
 
+// Structs for deserializing yosys netlists
+
 use serde::Deserialize;
 use std::collections::HashMap;
 
