@@ -3,7 +3,8 @@
 
 use std::collections::HashMap;
 use itertools::izip;
-use wellen::{Signal, SignalValue, TimeTableIdx};
+use wellen::{Signal, simple::Waveform, SignalValue, TimeTableIdx};
+use rayon::prelude::*;
 
 #[derive(Debug, Clone)]
 pub struct SignalStats {
@@ -43,21 +44,39 @@ impl SignalStats {
     }
 }
 
-fn val_at(ti: TimeTableIdx, sig: &Signal) -> (SignalValue, TimeTableIdx) {
+fn val_at(ti: TimeTableIdx, sig: &Signal) -> SignalValue<'_> {
     let offset = sig.get_offset(ti).unwrap();
-    (sig.get_value_at(&offset, 0), sig.get_time_idx_at(&offset))
+    return sig.get_value_at(&offset, 0)
 }
 
-pub fn calc_stats(sig: &Signal, time_end: wellen::Time) -> PackedStats {
+fn time_value_at(wave: &Waveform, ti: TimeTableIdx) -> u64 {
+    let time_stamp = wave.time_table()[ti as usize];
+    return time_stamp;
+}
+
+pub fn calc_stats_for_each_time_span(wave: &Waveform, sig: &Signal, num_of_iterations: u64) -> Vec<PackedStats> {
+    let mut stats = Vec::with_capacity(num_of_iterations as usize);
+    let time_span = (*wave.time_table().last().unwrap()) / num_of_iterations;
+
+    stats.extend((0..num_of_iterations).into_par_iter().map(|index| {
+        let first_time_stamp = index * time_span;
+        let last_time_stamp = (index + 1) * time_span;
+        return calc_stats(wave, sig, first_time_stamp, last_time_stamp);
+    }).collect::<Vec<PackedStats>>());
+
+    return stats;
+}
+
+pub fn calc_stats(wave: &Waveform, sig: &Signal, first_time_stamp: wellen::Time, last_time_stamp: wellen::Time) -> PackedStats {
     let n = sig.time_indices().len();
     if n == 0 {
         return PackedStats::Vector(Vec::new());
     }
 
-    let (mut prev_val, mut prev_ts) = val_at(sig.get_first_time_idx().unwrap(), sig);
+    let mut prev_val = val_at(sig.get_first_time_idx().unwrap(), sig);
     
     let bits = prev_val.bits();
-
+    
     // Check if bits are valid, otherwise value is a real number
     let bit_len = if let Some(bit_len) = bits {
         bit_len
@@ -71,9 +90,36 @@ pub fn calc_stats(sig: &Signal, time_end: wellen::Time) -> PackedStats {
     for _ in 0..bit_len {
         ss.push(Default::default())
     }
+    
+    let mut current_value_entry_index: usize = 1;
 
-    for time_idx in sig.time_indices().iter() {
-        let (val, ts) = val_at(*time_idx, sig);
+    // Fast forward to relevant starting time stamp
+    while current_value_entry_index < sig.time_indices().len() {
+        let time_idx = sig.time_indices()[current_value_entry_index];
+        
+        if time_value_at(wave, time_idx) > first_time_stamp {
+            break;
+        }
+        
+        prev_val = val_at(time_idx, sig);
+        
+        current_value_entry_index += 1;
+    }
+
+    // For high time calculations to start only from specified first time stamp
+    let mut prev_ts = first_time_stamp;
+    
+    // Accumulate statistics over desired time span
+    while current_value_entry_index < sig.time_indices().len() {
+        let time_idx = sig.time_indices()[current_value_entry_index];
+        let val = val_at(time_idx, sig);
+        let ts = time_value_at(wave, time_idx);
+        current_value_entry_index += 1;
+
+        if ts > last_time_stamp {
+            break;
+        }
+
         let val_str = val.to_bit_string().unwrap();
         let prev_val_str = prev_val.to_bit_string().unwrap();
         for (c, prev_c, i) in izip!(val_str.chars(), prev_val_str.chars(), 0..) {
@@ -97,14 +143,14 @@ pub fn calc_stats(sig: &Signal, time_end: wellen::Time) -> PackedStats {
                 }
             }
 
-            ss[i].modify_time_stat_of_value(prev_c, |v| v + ts - prev_ts);
+            ss[i].modify_time_stat_of_value(prev_c, |v| v + (ts - prev_ts) as u32);
         }
         prev_ts = ts;
         prev_val = val;
     }
 
     for (prev_c, i) in izip!(prev_val.to_bit_string().unwrap().chars(), 0..) {
-        ss[i].modify_time_stat_of_value(prev_c, |v| v + (time_end - (prev_ts as u64)) as u32);
+        ss[i].modify_time_stat_of_value(prev_c, |v| v + (last_time_stamp - (prev_ts as u64)) as u32);
     }
 
     // TODO: Figure out how the indexing direction is denoted

@@ -58,6 +58,7 @@ struct Cli {
     #[arg(long)]
     remove_virtual_pins: bool,
     /// Write the output to a specified file instead of stdout.
+    /// In case of per clock cycle output, it must be a directory.
     #[arg(short, long)]
     output: Option<std::path::PathBuf>,
     /// Ignore exporting current date.
@@ -65,7 +66,10 @@ struct Cli {
     ignore_date: bool,
     /// Ignore exporting current version.
     #[arg(long)]
-    ignore_version: bool
+    ignore_version: bool,
+    /// Accumulate stats for each clock cycle separately. Output path is required to be a directory.
+    #[arg(long)]
+    per_clock_cycle: bool
 }
 
 fn indexed_name(mut name: String, variable: &Var) -> String {
@@ -123,7 +127,8 @@ impl FromStr for OutputFormat {
 struct Context {
     wave: Waveform,
     clk_period: f64,
-    stats: HashMap<HashVarRef, PackedStats>,
+    stats: HashMap<HashVarRef, Vec<PackedStats>>,
+    num_of_iterations: u64,
     lookup_point: LookupPoint,
     output_fmt: OutputFormat,
     scope_prefix_length: usize,
@@ -146,6 +151,10 @@ impl Context {
         let mut wave =
             wellen::simple::read_with_options(args.input_file.to_str().unwrap(), &LOAD_OPTS)
                 .unwrap();
+
+        let clk_period = 1.0_f64 / args.clk_freq;
+        let timescale = wave.hierarchy().timescale().unwrap();
+        let timescale_norm = (timescale.factor as f64) * (10.0_f64).powf(timescale.unit.to_exponent().unwrap() as f64);
 
         let lookup_point = match &args.limit_scope {
             None => LookupPoint::Top,
@@ -178,19 +187,18 @@ impl Context {
 
         wave.load_signals_multi_threaded(&all_signals);
 
-        let time_end = *wave.time_table().last().unwrap();
+        let last_time_stamp = *wave.time_table().last().expect("Given waveform shouldn't be empty");
+        let num_of_iterations = if args.per_clock_cycle { (last_time_stamp as f64 * timescale_norm / clk_period) as u64 } else { 1 };
 
         // TODO: A massive optimization that can be done here is to calculate stats only
         // for exported signals instead of all nets
         // It's easy to do with the current implementation of DFS (see src/exporter/mod.rs).
         // However it's single-threaded and parallelizing it efficiently is non-trivial.
-        let stats: HashMap<HashVarRef, stats::PackedStats> = all_vars.par_iter()
+        let stats: HashMap<HashVarRef, Vec<stats::PackedStats>> = all_vars.par_iter()
             .zip(all_signals)
             .map(|(var_ref, sig_ref)| (*var_ref, wave.get_signal(sig_ref).unwrap()))
-            .map(|(var_ref, sig)| (HashVarRef(var_ref), stats::calc_stats(sig, time_end)))
+            .map(|(var_ref, sig)| (HashVarRef(var_ref), stats::calc_stats_for_each_time_span(&wave, sig, num_of_iterations)))
             .collect();
-
-        let clk_period = 1.0_f64 / args.clk_freq;
 
         let top_scope = args.top_scope.as_ref()
             .map(|s| get_scope_by_full_name(wave.hierarchy(), s)
@@ -200,7 +208,8 @@ impl Context {
         Self {
             wave,
             clk_period,
-            stats: stats,
+            stats,
+            num_of_iterations,
             lookup_point,
             output_fmt: args.output_format,
             scope_prefix_length: lookup_scope_name_prefix.len(),
@@ -220,22 +229,47 @@ impl Context {
     }
 }
 
-fn process_trace<W>(ctx: Context, out: W) where W: std::io::Write {
+fn process_trace<W>(ctx: &Context, out: W, iteration: usize) where W: std::io::Write {
     match &ctx.output_fmt {
-        OutputFormat::Tcl => exporters::tcl::export(ctx, out),
-        OutputFormat::Saif => exporters::saif::export(ctx, out),
+        OutputFormat::Tcl => exporters::tcl::export(&ctx, out, iteration),
+        OutputFormat::Saif => exporters::saif::export(&ctx, out, iteration),
     }.unwrap()
+}
+
+fn process_trace_iterations(ctx: &Context, output_path: Option<std::path::PathBuf>) {
+    if output_path == None {
+        panic!("Output is saved as separate files, so you must specify a path to a directory")
+    }
+    
+    let mut path = output_path.unwrap();
+    
+    // TODO: multithreading can also be introduced here to process each iteration in parallel
+    for iteration in 0..ctx.num_of_iterations as usize {
+        path.push(format!("{:05}", iteration));
+        let f = std::fs::File::create(&path).unwrap();
+        let writer = std::io::BufWriter::new(f);
+        process_trace(&ctx, writer, iteration);
+        path.pop();
+    }
+}
+
+fn process_single_iteration_trace(ctx: &Context, output_path: Option<std::path::PathBuf>) {
+    match output_path {
+        None => process_trace(&ctx, std::io::stdout(), 0),
+        Some(ref path) => {
+            let f = std::fs::File::create(path).unwrap();
+            let writer = std::io::BufWriter::new(f);
+            process_trace(&ctx, writer, 0);
+        }
+    }
 }
 
 fn main() {
     let args = Cli::parse();
     let ctx = Context::build_from_args(&args);
-    match args.output {
-        None => process_trace(ctx, std::io::stdout()),
-        Some(path) => {
-            let f = std::fs::File::create(path).unwrap();
-            let writer = std::io::BufWriter::new(f);
-            process_trace(ctx, writer);
-        }
+    if ctx.num_of_iterations > 1 {
+        process_trace_iterations(&ctx, args.output);
+    } else {
+        process_single_iteration_trace(&ctx, args.output);
     }
 }

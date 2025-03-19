@@ -28,23 +28,25 @@ impl From<&SignalStats> for TclStat {
     }
 }
 
-struct TclAgent {
-    stats: HashMap<HashVarRef, PackedStats>,
+struct TclAgent<'a> {
+    stats: &'a HashMap<HashVarRef, Vec<PackedStats>>,
+    span_index: usize,
     grouped_stats: HashMap<TclStat, Vec<String>>,
     scope: Vec<String>,
 }
 
-impl TclAgent {
-    fn new(stats: HashMap<HashVarRef, PackedStats>) -> Self {
+impl<'a> TclAgent<'a> {
+    fn new(stats: &'a HashMap<HashVarRef, Vec<PackedStats>>, span_index: usize) -> Self {
         Self {
             stats,
+            span_index,
             grouped_stats: HashMap::new(),
             scope: Vec::new()
         }
     }
 }
 
-impl<'w, W> TraceVisitorAgent<'w, W> for TclAgent where W: std::io::Write {
+impl<'w, W> TraceVisitorAgent<'w, W> for TclAgent<'w> where W: std::io::Write {
     type Error = std::io::Error;
 
     fn enter_net(&mut self, ctx: &mut TraceVisitCtx<W>, var_ref: VarRef)
@@ -61,7 +63,7 @@ impl<'w, W> TraceVisitorAgent<'w, W> for TclAgent where W: std::io::Write {
             net.name(ctx.waveform.hierarchy())
         );
 
-        match stats {
+        match &stats[self.span_index] {
             PackedStats::OneBit(stat) => {
                 self.grouped_stats.entry(TclStat::from(stat))
                     .or_insert_with(|| vec![])
@@ -91,8 +93,9 @@ impl<'w, W> TraceVisitorAgent<'w, W> for TclAgent where W: std::io::Write {
 }
 
 pub fn export<W>(
-    ctx: crate::Context,
-    mut out: W
+    ctx: &crate::Context,
+    mut out: W,
+    iteration: usize
 ) -> std::io::Result<()>
     where W: std::io::Write
 {
@@ -111,14 +114,14 @@ pub fn export<W>(
         out: &mut out,
         waveform: &ctx.wave,
         netlist_root,
-        top_module: ctx.top,
+        top_module: &ctx.top,
         netlist: ctx.netlist.as_ref(),
         netlist_prefix: Vec::new(),
         blackboxes_only: ctx.blackboxes_only,
         remove_virtual_pins: ctx.remove_virtual_pins,
     };
 
-    let mut agent = TclAgent::new(ctx.stats);
+    let mut agent = TclAgent::new(&ctx.stats, iteration);
     if let LookupPoint::Scope(scope_ref) = ctx.lookup_point {
         let scope_name = ctx.wave.hierarchy().get(scope_ref).full_name(ctx.wave.hierarchy());
         let mut scope: Vec<_> = scope_name.split('.').map(ToString::to_string).collect();
@@ -133,9 +136,9 @@ pub fn export<W>(
 
     writeln!(out, "proc set_pin_activity_and_duty {{}} {{")?;
     for (stats, pins) in agent.grouped_stats {
-        let duty = (stats.high_time as f64) / (time_end as f64);
+        let duty = (stats.high_time as f64) / ((time_end / ctx.num_of_iterations) as f64);
         let activity = ((stats.trans_count_doubled as f64) / 2.0_f64)
-            / ((time_end as f64) * timescale_norm / ctx.clk_period);
+            / (((time_end / ctx.num_of_iterations) as f64) * timescale_norm / ctx.clk_period);
         writeln!(
             out,
             "  set_power_activity -pins \"{}\" -activity {} -duty {}",
