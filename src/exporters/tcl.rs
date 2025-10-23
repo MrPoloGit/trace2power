@@ -119,6 +119,7 @@ pub fn export<W>(
         netlist_prefix: Vec::new(),
         blackboxes_only: ctx.blackboxes_only,
         remove_virtual_pins: ctx.remove_virtual_pins,
+        export_empty: ctx.export_empty
     };
 
     let mut agent = TclAgent::new(&ctx.stats, iteration);
@@ -136,9 +137,16 @@ pub fn export<W>(
 
     writeln!(out, "proc set_pin_activity_and_duty {{}} {{")?;
     for (stats, pins) in agent.grouped_stats {
-        let duty = (stats.high_time as f64) / ((time_end / ctx.num_of_iterations) as f64);
-        let activity = ((stats.trans_count_doubled as f64) / 2.0_f64)
-            / (((time_end / ctx.num_of_iterations) as f64) * timescale_norm / ctx.clk_period);
+        let (duty, activity) = if ctx.export_empty {
+            (0.0, 0.0)
+        } else {
+            (
+                (stats.high_time as f64) / ((time_end / ctx.num_of_iterations) as f64),
+                ((stats.trans_count_doubled as f64) / 2.0_f64)
+                    / (((time_end / ctx.num_of_iterations) as f64) * timescale_norm / ctx.clk_period)
+            )
+        };
+
         writeln!(
             out,
             "  set_power_activity -pins \"{}\" -activity {} -duty {}",

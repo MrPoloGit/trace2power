@@ -1,12 +1,12 @@
 // Copyright (c) 2024-2025 Antmicro <www.antmicro.com>
 // SPDX-License-Identifier: Apache-2.0
 
-use std::str::FromStr;
+use std::{str::FromStr};
 use std::collections::HashMap;
 
 use clap::Parser;
 use stats::PackedStats;
-use wellen::{self, simple::Waveform, GetItem, Hierarchy, ScopeRef, Var, VarRef};
+use wellen::{self, simple::Waveform, GetItem, Hierarchy, ScopeRef, SignalRef, Var, VarRef};
 use rayon::prelude::*;
 
 pub mod util;
@@ -34,6 +34,9 @@ struct Cli {
     /// Clock frequency (in Hz)
     #[arg(short, long, value_parser = clap::value_parser!(f64))]
     clk_freq: f64,
+    /// Clock signal name
+    #[arg(long)]
+    clock_name: Option<String>,
     /// Format to extract data into
     #[arg(short = 'f', long, default_value = "tcl")]
     output_format: OutputFormat,
@@ -69,7 +72,13 @@ struct Cli {
     ignore_version: bool,
     /// Accumulate stats for each clock cycle separately. Output path is required to be a directory.
     #[arg(long)]
-    per_clock_cycle: bool
+    per_clock_cycle: bool,
+    /// Write stats only for glitches
+    #[arg(long)]
+    only_glitches: bool,
+    /// Export without accumulation
+    #[arg(long)]
+    export_empty: bool
 }
 
 fn indexed_name(mut name: String, variable: &Var) -> String {
@@ -138,7 +147,8 @@ struct Context {
     blackboxes_only: bool,
     remove_virtual_pins: bool,
     ignore_date: bool,
-    ignore_version: bool
+    ignore_version: bool,
+    export_empty: bool
 }
 
 impl Context {
@@ -153,37 +163,56 @@ impl Context {
                 args.input_file.to_str().expect("Arguments should contain a path to input trace file"), &LOAD_OPTS)
                 .expect("Waveform parsing should end successfully");
 
+        let wave_hierarchy = wave.hierarchy();
+
         let clk_period = 1.0_f64 / args.clk_freq;
-        let timescale = wave.hierarchy().timescale().expect("Trace file should contain a timescale");
+        let timescale = wave_hierarchy.timescale().expect("Trace file should contain a timescale");
         let timescale_norm = (timescale.factor as f64) * (10.0_f64).powf(timescale.unit.to_exponent().expect("Waveform should contain time unit") as f64);
 
         let lookup_point = match &args.limit_scope {
             None => LookupPoint::Top,
             Some(scope_str) => LookupPoint::Scope(
-                get_scope_by_full_name(wave.hierarchy(), scope_str).expect("Requested scope not found")
+                get_scope_by_full_name(wave_hierarchy, scope_str).expect("Requested scope not found")
             ),
         };
 
         let lookup_scope_name_prefix = match lookup_point {
             LookupPoint::Top => "".to_string(),
             LookupPoint::Scope(scope_ref) => {
-                let scope = wave.hierarchy().get(scope_ref);
-                scope.full_name(wave.hierarchy()).to_string() + "."
+                let scope = wave_hierarchy.get(scope_ref);
+                scope.full_name(wave_hierarchy).to_string() + "."
             }
         };
 
         let (all_vars, all_signals): (Vec<_>, Vec<_>) = match lookup_point {
-            LookupPoint::Top => wave.hierarchy().var_refs_iter()
-                .map(|var_ref| (var_ref, wave.hierarchy().get(var_ref).signal_ref()))
+            LookupPoint::Top => wave_hierarchy.var_refs_iter()
+                .map(|var_ref| (var_ref, wave_hierarchy.get(var_ref).signal_ref()))
                 .unzip(),
-            LookupPoint::Scope(_) => wave.hierarchy().var_refs_iter()
-                .map(|var_ref| (var_ref, wave.hierarchy().get(var_ref)))
+            LookupPoint::Scope(_) => wave_hierarchy.var_refs_iter()
+                .map(|var_ref| (var_ref, wave_hierarchy.get(var_ref)))
                 .filter(|(_, var)| {
-                    let fname = indexed_name(var.full_name(wave.hierarchy().into()), var);
+                    let fname = indexed_name(var.full_name(wave_hierarchy.into()), var);
                     fname.starts_with(&lookup_scope_name_prefix)
                 })
                 .map(|(var_ref, var)| (var_ref, var.signal_ref()))
                 .unzip()
+        };
+
+        let clk_signal: Option<SignalRef> = match &args.clock_name {
+            None => None,
+            Some(clock_name) => {
+                let mut found: Option<SignalRef> = None;
+
+                for var_ref in wave_hierarchy.var_refs_iter() {
+                    let net = wave_hierarchy.get(var_ref);
+                    let sig_ref = net.signal_ref();
+                    if net.name(wave_hierarchy) == clock_name {
+                        found = Some(sig_ref)
+                    }
+                }
+
+                found
+            }
         };
 
         wave.load_signals_multi_threaded(&all_signals);
@@ -197,8 +226,7 @@ impl Context {
         // However it's single-threaded and parallelizing it efficiently is non-trivial.
         let stats: HashMap<HashVarRef, Vec<stats::PackedStats>> = all_vars.par_iter()
             .zip(all_signals)
-            .map(|(var_ref, sig_ref)| (*var_ref, wave.get_signal(sig_ref).expect("Signal should exist")))
-            .map(|(var_ref, sig)| (HashVarRef(var_ref), stats::calc_stats_for_each_time_span(&wave, sig, num_of_iterations)))
+            .map(|(var_ref, sig_ref)| (HashVarRef(*var_ref), stats::calc_stats_for_each_time_span(&wave, args.only_glitches, clk_signal, sig_ref, num_of_iterations)))
             .collect();
 
         let top_scope = args.top_scope.as_ref()
@@ -225,7 +253,8 @@ impl Context {
             blackboxes_only: args.blackboxes_only,
             remove_virtual_pins: args.remove_virtual_pins,
             ignore_date: args.ignore_date,
-            ignore_version: args.ignore_version
+            ignore_version: args.ignore_version,
+            export_empty: args.export_empty
         }
     }
 }

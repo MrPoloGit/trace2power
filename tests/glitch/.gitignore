@@ -1,0 +1,8 @@
+*
+!.gitignore
+!Makefile
+!compare_tcl.sh
+!saif
+!saif/*
+!tcl
+!tcl/*
