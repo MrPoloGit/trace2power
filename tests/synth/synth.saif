@@ -3,7 +3,6 @@
   (DIRECTION "backward")
   (DESIGN )
   (PROGRAM_NAME "trace2power")
-  (VERSION "0.2.1")
   (DIVIDER / )
   (TIMESCALE 1ns)
   (DURATION 300)

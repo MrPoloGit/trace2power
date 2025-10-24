@@ -16,6 +16,7 @@ trace2power \
     --output-format saif \
     --limit-scope tail \
     --ignore-date \
+    --ignore-version \
     --output out.saif \
     tail.vcd
 

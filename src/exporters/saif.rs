@@ -194,13 +194,11 @@ pub fn export<W>(
               (DIRECTION \"backward\")
               (DESIGN )
               (PROGRAM_NAME \"{}\")
-              (VERSION \"{}\")
               (DIVIDER / )
               (TIMESCALE {}{})
               (DURATION {})
         "),
         clap::crate_name!(),
-        clap::crate_version!(),
         timescale.factor, DisplayTimescaleUnit(timescale.unit),
         time_end
     )?;
@@ -210,6 +208,14 @@ pub fn export<W>(
             out,
             "  (DATE \"{}\")",
             Utc::now().format("%a %b %-d %T %Y")
+        )?;
+    }
+
+    if !ctx.ignore_version {
+        writeln!(
+            out,
+            "  (VERSION \"{}\")",
+            clap::crate_version!()
         )?;
     }
 

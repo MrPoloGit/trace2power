@@ -12,6 +12,7 @@ trace2power \
     --remove-virtual-pins \
     --limit-scope counter_tb.counter0 \
     --ignore-date \
+    --ignore-version \
     --output out.saif \
     counter.vcd
 

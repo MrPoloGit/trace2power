@@ -16,6 +16,7 @@ trace2power \
     --output-format saif \
     --limit-scope counter_tb \
     --ignore-date \
+    --ignore-version \
     --output out.saif \
     counter.vcd
 

@@ -16,6 +16,7 @@ trace2power \
     --output-format saif \
     --limit-scope tristate_tb \
     --ignore-date \
+    --ignore-version \
     --output out.saif \
     tristate.vcd
 

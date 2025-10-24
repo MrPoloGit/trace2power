@@ -62,7 +62,10 @@ struct Cli {
     output: Option<std::path::PathBuf>,
     /// Ignore exporting current date.
     #[arg(long)]
-    ignore_date: bool
+    ignore_date: bool,
+    /// Ignore exporting current version.
+    #[arg(long)]
+    ignore_version: bool
 }
 
 fn indexed_name(mut name: String, variable: &Var) -> String {
@@ -129,7 +132,8 @@ struct Context {
     top_scope: Option<ScopeRef>,
     blackboxes_only: bool,
     remove_virtual_pins: bool,
-    ignore_date: bool
+    ignore_date: bool,
+    ignore_version: bool
 }
 
 impl Context {
@@ -210,7 +214,8 @@ impl Context {
             top_scope,
             blackboxes_only: args.blackboxes_only,
             remove_virtual_pins: args.remove_virtual_pins,
-            ignore_date: args.ignore_date
+            ignore_date: args.ignore_date,
+            ignore_version: args.ignore_version
         }
     }
 }
