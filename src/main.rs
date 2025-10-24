@@ -149,12 +149,13 @@ impl Context {
         };
 
         let mut wave =
-            wellen::simple::read_with_options(args.input_file.to_str().unwrap(), &LOAD_OPTS)
-                .unwrap();
+            wellen::simple::read_with_options(
+                args.input_file.to_str().expect("Arguments should contain a path to input trace file"), &LOAD_OPTS)
+                .expect("Waveform parsing should end successfully");
 
         let clk_period = 1.0_f64 / args.clk_freq;
-        let timescale = wave.hierarchy().timescale().unwrap();
-        let timescale_norm = (timescale.factor as f64) * (10.0_f64).powf(timescale.unit.to_exponent().unwrap() as f64);
+        let timescale = wave.hierarchy().timescale().expect("Trace file should contain a timescale");
+        let timescale_norm = (timescale.factor as f64) * (10.0_f64).powf(timescale.unit.to_exponent().expect("Waveform should contain time unit") as f64);
 
         let lookup_point = match &args.limit_scope {
             None => LookupPoint::Top,
@@ -196,7 +197,7 @@ impl Context {
         // However it's single-threaded and parallelizing it efficiently is non-trivial.
         let stats: HashMap<HashVarRef, Vec<stats::PackedStats>> = all_vars.par_iter()
             .zip(all_signals)
-            .map(|(var_ref, sig_ref)| (*var_ref, wave.get_signal(sig_ref).unwrap()))
+            .map(|(var_ref, sig_ref)| (*var_ref, wave.get_signal(sig_ref).expect("Signal should exist")))
             .map(|(var_ref, sig)| (HashVarRef(var_ref), stats::calc_stats_for_each_time_span(&wave, sig, num_of_iterations)))
             .collect();
 
@@ -233,7 +234,7 @@ fn process_trace<W>(ctx: &Context, out: W, iteration: usize) where W: std::io::W
     match &ctx.output_fmt {
         OutputFormat::Tcl => exporters::tcl::export(&ctx, out, iteration),
         OutputFormat::Saif => exporters::saif::export(&ctx, out, iteration),
-    }.unwrap()
+    }.expect("Output format should be either 'tcl' or 'saif'")
 }
 
 fn process_trace_iterations(ctx: &Context, output_path: Option<std::path::PathBuf>) {
@@ -241,12 +242,12 @@ fn process_trace_iterations(ctx: &Context, output_path: Option<std::path::PathBu
         panic!("Output is saved as separate files, so you must specify a path to a directory")
     }
     
-    let mut path = output_path.unwrap();
+    let mut path = output_path.expect("Output path should be valid");
     
     // TODO: multithreading can also be introduced here to process each iteration in parallel
     for iteration in 0..ctx.num_of_iterations as usize {
         path.push(format!("{:05}", iteration));
-        let f = std::fs::File::create(&path).unwrap();
+        let f = std::fs::File::create(&path).expect("Created file should be valid");
         let writer = std::io::BufWriter::new(f);
         process_trace(&ctx, writer, iteration);
         path.pop();
@@ -257,7 +258,7 @@ fn process_single_iteration_trace(ctx: &Context, output_path: Option<std::path::
     match output_path {
         None => process_trace(&ctx, std::io::stdout(), 0),
         Some(ref path) => {
-            let f = std::fs::File::create(path).unwrap();
+            let f = std::fs::File::create(path).expect("Created file should be valid");
             let writer = std::io::BufWriter::new(f);
             process_trace(&ctx, writer, 0);
         }

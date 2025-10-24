@@ -176,7 +176,7 @@ where
                 let mut module_ref = ModuleRef::OutsideNetlist;
                 let mut child_scope = ctx.waveform.hierarchy().scopes()
                     .map(|scope_ref| hier.get(scope_ref))
-                    .find(|scope| scope.name(hier) == full_path[0]).unwrap();
+                    .find(|scope| scope.name(hier) == full_path[0]).expect("Child scope should be valid");
 
                 ctx.netlist_prefix.push(full_path[0].to_string());
 
@@ -186,7 +186,7 @@ where
                     for scope_name in &full_path[1..] {
                         child_scope = child_scope.scopes(hier)
                             .map(|scope_ref| hier.get(scope_ref))
-                            .find(|scope| scope.name(hier) == scope_name).unwrap();
+                            .find(|scope| scope.name(hier) == scope_name).expect("Child scope should be valid");
                         module_ref = get_child_module_reference(ctx, child_scope, module_ref);
                         if let ModuleRef::OutsideNetlist = module_ref {
                             ctx.netlist_prefix.push(scope_name.to_string());

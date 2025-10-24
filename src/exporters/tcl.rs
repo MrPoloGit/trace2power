@@ -100,7 +100,7 @@ pub fn export<W>(
     where W: std::io::Write
 {
     let hier = ctx.wave.hierarchy();
-    let time_end = *ctx.wave.time_table().last().unwrap();
+    let time_end = *ctx.wave.time_table().last().expect("Waveform shouldn't be empty");
 
     let netlist_root = match ctx.top_scope {
         Some(scope_ref) => hier.get(scope_ref).full_name(hier)
@@ -130,9 +130,9 @@ pub fn export<W>(
     }
     agent.visit_hierarchy(ctx.lookup_point, &mut visitor_ctx)?;
 
-    let timescale = ctx.wave.hierarchy().timescale().unwrap();
+    let timescale = ctx.wave.hierarchy().timescale().expect("Waveform should contain a timescale");
     let timescale_norm =
-        (timescale.factor as f64) * (10.0_f64).powf(timescale.unit.to_exponent().unwrap() as f64);
+        (timescale.factor as f64) * (10.0_f64).powf(timescale.unit.to_exponent().expect("Waveform should contain a time unit") as f64);
 
     writeln!(out, "proc set_pin_activity_and_duty {{}} {{")?;
     for (stats, pins) in agent.grouped_stats {

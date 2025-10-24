@@ -54,8 +54,8 @@ impl<'a> SaifAgent<'a> {
 }
 
 impl<'a> SaifAgent<'a> {
-    fn get_ctx<'s>(&'s self) -> &'s ScopeCtx { self.scope_ctx.last().unwrap() }
-    fn get_ctx_mut<'s>(&'s mut self) -> &'s mut ScopeCtx { self.scope_ctx.last_mut().unwrap() }
+    fn get_ctx<'s>(&'s self) -> &'s ScopeCtx { self.scope_ctx.last().expect("Scope context should be valid") }
+    fn get_ctx_mut<'s>(&'s mut self) -> &'s mut ScopeCtx { self.scope_ctx.last_mut().expect("Scope context should be valid") }
     fn get_parent_ctx_mut<'s>(&'s mut self) -> Option<&'s mut ScopeCtx> {
         let len = self.scope_ctx.len();
         if len >= 2 {
@@ -186,8 +186,8 @@ pub fn export<W>(
     where W: std::io::Write
 {
     let hier = ctx.wave.hierarchy();
-    let time_end = *ctx.wave.time_table().last().unwrap();
-    let timescale = hier.timescale().unwrap();
+    let time_end = *ctx.wave.time_table().last().expect("Waveform shouldn't be empty");
+    let timescale = hier.timescale().expect("Waveform should contain a timescale");
 
     write!(
         out,

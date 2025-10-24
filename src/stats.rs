@@ -45,7 +45,7 @@ impl SignalStats {
 }
 
 fn val_at(ti: TimeTableIdx, sig: &Signal) -> SignalValue<'_> {
-    let offset = sig.get_offset(ti).unwrap();
+    let offset = sig.get_offset(ti).expect("Signal change timestamp should be valid");
     return sig.get_value_at(&offset, 0)
 }
 
@@ -56,7 +56,7 @@ fn time_value_at(wave: &Waveform, ti: TimeTableIdx) -> u64 {
 
 pub fn calc_stats_for_each_time_span(wave: &Waveform, sig: &Signal, num_of_iterations: u64) -> Vec<PackedStats> {
     let mut stats = Vec::with_capacity(num_of_iterations as usize);
-    let time_span = (*wave.time_table().last().unwrap()) / num_of_iterations;
+    let time_span = (*wave.time_table().last().expect("Waveform shouldn't be empty")) / num_of_iterations;
 
     stats.extend((0..num_of_iterations).into_par_iter().map(|index| {
         let first_time_stamp = index * time_span;
@@ -73,7 +73,7 @@ pub fn calc_stats(wave: &Waveform, sig: &Signal, first_time_stamp: wellen::Time,
         return PackedStats::Vector(Vec::new());
     }
 
-    let mut prev_val = val_at(sig.get_first_time_idx().unwrap(), sig);
+    let mut prev_val = val_at(sig.get_first_time_idx().expect("Signal should have at least one value change"), sig);
     
     let bits = prev_val.bits();
     
@@ -120,8 +120,8 @@ pub fn calc_stats(wave: &Waveform, sig: &Signal, first_time_stamp: wellen::Time,
             break;
         }
 
-        let val_str = val.to_bit_string().unwrap();
-        let prev_val_str = prev_val.to_bit_string().unwrap();
+        let val_str = val.to_bit_string().expect("Signal's value should be valid");
+        let prev_val_str = prev_val.to_bit_string().expect("Signal's previous value should be valid");
         for (c, prev_c, i) in izip!(val_str.chars(), prev_val_str.chars(), 0..) {
             match (prev_c, c) {
                 ('0', '1') | ('1', '0') => {
@@ -149,7 +149,7 @@ pub fn calc_stats(wave: &Waveform, sig: &Signal, first_time_stamp: wellen::Time,
         prev_val = val;
     }
 
-    for (prev_c, i) in izip!(prev_val.to_bit_string().unwrap().chars(), 0..) {
+    for (prev_c, i) in izip!(prev_val.to_bit_string().expect("Signal's previous value should be valid").chars(), 0..) {
         ss[i].modify_time_stat_of_value(prev_c, |v| v + (last_time_stamp - (prev_ts as u64)) as u32);
     }
 
@@ -157,7 +157,7 @@ pub fn calc_stats(wave: &Waveform, sig: &Signal, first_time_stamp: wellen::Time,
     ss.reverse();
 
     return if ss.len() == 1 {
-        PackedStats::OneBit(ss.into_iter().next().unwrap())
+        PackedStats::OneBit(ss.into_iter().next().expect("Signal's value should be valid"))
     } else {
         PackedStats::Vector(ss)
     }
