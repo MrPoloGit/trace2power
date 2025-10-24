@@ -205,6 +205,14 @@ pub fn export<W>(
         time_end
     )?;
 
+    if !ctx.ignore_date {
+        writeln!(
+            out,
+            "  (DATE \"{}\")",
+            Utc::now().format("%a %b %-d %T %Y")
+        )?;
+    }
+
     let netlist_root = match ctx.top_scope {
         Some(scope_ref) => hier.get(scope_ref).full_name(hier)
             .split('.')

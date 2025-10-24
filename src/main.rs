@@ -59,7 +59,10 @@ struct Cli {
     remove_virtual_pins: bool,
     /// Write the output to a specified file instead of stdout.
     #[arg(short, long)]
-    output: Option<std::path::PathBuf>
+    output: Option<std::path::PathBuf>,
+    /// Ignore exporting current date.
+    #[arg(long)]
+    ignore_date: bool
 }
 
 fn indexed_name(mut name: String, variable: &Var) -> String {
@@ -125,7 +128,8 @@ struct Context {
     top: String,
     top_scope: Option<ScopeRef>,
     blackboxes_only: bool,
-    remove_virtual_pins: bool
+    remove_virtual_pins: bool,
+    ignore_date: bool
 }
 
 impl Context {
@@ -205,7 +209,8 @@ impl Context {
             top: args.top.clone().unwrap_or_else(String::new),
             top_scope,
             blackboxes_only: args.blackboxes_only,
-            remove_virtual_pins: args.remove_virtual_pins
+            remove_virtual_pins: args.remove_virtual_pins,
+            ignore_date: args.ignore_date
         }
     }
 }
