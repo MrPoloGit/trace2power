@@ -5,6 +5,7 @@ edition = "2021"
 description = "Reads VCD and FST signal traces and extracts accumulated power activity data for use with power analysis tools."
 license = "Apache-2.0"
 repository = "https://github.com/antmicro/trace2power"
+exclude = [".ci.yml", ".github"]
 
 [dependencies]
 wellen = "^0.12.2"
